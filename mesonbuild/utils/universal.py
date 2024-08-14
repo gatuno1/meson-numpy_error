@@ -1549,6 +1549,10 @@ def Popen_safe(args: T.List[str], write: T.Optional[str] = None,
     # without the above stdin workaround, so set the console mode again just in
     # case.
     mlog.setup_console()
+    # Alternative mitigation of issue #12979 and #12935
+    # Convert to empty string if it is None
+    o = o or ''
+    e = e or ''
     return p, o, e
 
 

@@ -319,7 +319,11 @@ def _detect_c_or_cpp_compiler(env: 'Environment', lang: str, for_machine: Machin
 
         cmd = compiler + [arg]
         try:
-            p, out, err = Popen_safe_logged(cmd, msg='Detecting compiler via')
+            _, out, err = Popen_safe_logged(cmd, msg='Detecting compiler via')
+            # Alternative mitigation of issue #12979 and #12935
+            # Convert to empty string if it is None
+            out = out or ''
+            err = err or ''
         except OSError as e:
             popen_exceptions[join_args(cmd)] = e
             continue
