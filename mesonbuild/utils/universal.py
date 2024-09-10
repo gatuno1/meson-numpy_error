@@ -24,7 +24,7 @@ import pickle
 import errno
 import json
 
-from mesonbuild import mlog
+from mesonbuild import mlog, mesonlib
 from .core import MesonException, HoldableObject
 
 if T.TYPE_CHECKING:
@@ -1533,13 +1533,60 @@ def Popen_safe(args: T.List[str], write: T.Optional[str] = None,
     if write is not None:
         stdin = subprocess.PIPE
 
+    p: subprocess.CompletedProcess[str]
+    o: str
+    e: str
+
     try:
         if not sys.stdout.encoding or encoding.upper() != 'UTF-8':
             p, o, e = Popen_safe_legacy(args, write=write, stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
         else:
-            p = subprocess.Popen(args, universal_newlines=True, encoding=encoding, close_fds=False,
-                                 stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
-            o, e = p.communicate(write)
+            p = subprocess.run(
+                args,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                shell=mesonlib.is_windows(),  # assure shell is used on Windows
+                timeout=10,
+                check=True,  # equivalent to universal_newlines=True,
+                encoding=encoding,
+                close_fds=False)
+
+            o = p.stdout
+            e = p.stderr
+            # p = subprocess.Popen(args, universal_newlines=True,
+            #                      encoding=encoding, close_fds=False,
+            #                      stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
+            # o, e = p.communicate(write)
+            # assert p.returncode is not None, 'Return code is None'
+            # assert p.returncode == 0, f'Command {args} failed with return code {p.returncode}'
+            # assert o is not None, 'stdout is None'
+            # assert e is not None, 'stderr is None'
+
+    # start of diagnostics except block
+    except subprocess.CalledProcessError as cpe:
+        o = cpe.stdout
+        e = cpe.stderr
+        # write to log - debug only
+        mlog.setup_console()
+        mlog.debug('-----------')
+        mlog.debug(f'Command: `{join_args(args)}` -> {cpe.returncode}')
+        mlog.debug(f'Stdout:\n{o}\n\nStderr:\n{e}')
+    except UnicodeDecodeError as ude:
+        o = ude.stdout
+        e = ude.stderr
+        # write to log - debug only
+        mlog.setup_console()
+        mlog.debug('-----------')
+        mlog.debug(f'Command: `{join_args(args)}` -> {ude.returncode}\nFailed to decode output: {ude}')
+        mlog.debug(f'Stdout:\n{o}\n\nStderr:\n{e}')
+    except subprocess.TimeoutExpired as te:
+        raise MesonException(f'Command {args} timed out: {te}')
+    except FileNotFoundError as fnfe:
+        raise MesonException(f'Command {args} failed: {fnfe.strerror}\n'
+                             'Is the command present in PATH?')
+    # end of diagnostics except block
+
     except OSError as oserr:
         if oserr.errno == errno.ENOEXEC:
             raise MesonException(f'Failed running {args[0]!r}, binary or interpreter not executable.\n'
